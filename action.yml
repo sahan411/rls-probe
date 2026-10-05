@@ -1,0 +1,80 @@
+name: "rls-probe"
+description: "Offline Row Level Security audit for Supabase migrations: static rules plus executed access probes (anon, user A, user B) in a local sandbox Postgres. No keys, no live project, no secrets."
+author: "sahan411"
+
+inputs:
+  path:
+    description: "Migrations folder or .sql files to audit, relative to the repository root. One path per line to pass several."
+    required: false
+    default: "supabase/migrations"
+  fail-on:
+    description: "Fail the step when findings at this level exist: high (critical and high), medium (critical, high and medium) or never."
+    required: false
+    default: "high"
+  schemas:
+    description: "Comma-separated schemas exposed through the Supabase API."
+    required: false
+    default: "public"
+  default-grants:
+    description: "on = assume Supabase's default privileges on the public schema (anon and authenticated may use everything, RLS decides). off = do not assume them."
+    required: false
+    default: "on"
+  sarif:
+    description: "true = also write a SARIF 2.1.0 file (path in the sarif-file output) that can be uploaded to GitHub code scanning."
+    required: false
+    default: "false"
+  timeout:
+    description: "Abort the audit after this many seconds."
+    required: false
+    default: "60"
+
+outputs:
+  critical:
+    description: "Number of CRITICAL findings."
+    value: ${{ steps.audit.outputs.critical }}
+  high:
+    description: "Number of HIGH findings."
+    value: ${{ steps.audit.outputs.high }}
+  medium:
+    description: "Number of MEDIUM findings."
+    value: ${{ steps.audit.outputs.medium }}
+  failing-tests:
+    description: "Number of executed access tests that failed (a user reached rows they should not, or lost access to their own)."
+    value: ${{ steps.audit.outputs.failing-tests }}
+  sarif-file:
+    description: "Path of the SARIF file when the sarif input is true."
+    value: ${{ steps.audit.outputs.sarif-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: "24"
+
+    - name: Install the audit's own dependencies
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
+    - name: Run the RLS audit
+      id: audit
+      shell: bash
+      env:
+        RLS_PATH: ${{ inputs.path }}
+        RLS_FAIL_ON: ${{ inputs.fail-on }}
+        RLS_SCHEMAS: ${{ inputs.schemas }}
+        RLS_DEFAULT_GRANTS: ${{ inputs.default-grants }}
+        RLS_SARIF: ${{ inputs.sarif }}
+        RLS_TIMEOUT: ${{ inputs.timeout }}
+      run: node "$GITHUB_ACTION_PATH/bin/ci.mjs"
+
+    - name: Add the audit summary to the job summary
+      if: always()
+      shell: bash
+      run: |
+        summary="$RUNNER_TEMP/rls-probe/summary.md"
+        if [ -s "$summary" ]; then
+          cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+        fi

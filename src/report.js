@@ -1,4 +1,5 @@
 import { SEVERITIES } from "./checks.js";
+import { mdText, mdCode, mdCodeCell } from "./text.js";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -53,9 +54,22 @@ export function toMarkdown(res, { title = "Supabase security audit", verificatio
   L.push("");
   if (verification) L.push("## Draft fix (SQL)", "", "```sql", verification.fix.sql.trim(), "```", "", ...(verification.fix.manual.length ? ["### Needs a human decision", "", ...verification.fix.manual.map((m) => `- \`${m.object}\` (${m.rule}): ${m.note}`), ""] : []));
   L.push("## What was and was not checked", "", ...LIMITS.map((x) => `- ${x}`), "");
-  if (res.load.skippedExtensions.length) L.push("## Load notes", "", "Extensions not available in the sandbox and skipped: " + [...new Set(res.load.skippedExtensions.map((e) => e.name))].join(", "), "");
+  const notes = loadNotes(res.load);
+  if (notes.length) L.push("## Load notes", "", ...notes.flatMap((n) => [n, ""]));
+  if (res.load.skippedStatements?.length) L.push(SKIPPED_LABEL, "",...res.load.skippedStatements.slice(0, 20).map((x) => `- ${x.file}:${x.line} ${x.reason} — \`${x.statement}\``), "");
   if (res.load.failed.length) L.push("Statements that could not be loaded (their objects are missing from this audit):", "", ...res.load.failed.slice(0, 20).map((x) => `- ${x.file}:${x.line} ${x.message} — \`${x.statement}\``), "");
   return L.join("\n");
+}
+
+const SKIPPED_LABEL = "Statements that were not executed (they could stall the audit, or hide the rest of the file):";
+
+// Plain-text load notes shared by the Markdown and HTML reports.
+export function loadNotes(load) {
+  const notes = [];
+  if (load.dataSkipped) notes.push(`${load.dataSkipped} data statement(s) skipped: row data is ignored and never loaded (every COPY and every INSERT except into storage.buckets).`);
+  if (load.skippedExtensions.length) notes.push("Extensions not available in the sandbox and skipped: " + [...new Set(load.skippedExtensions.map((e) => e.name))].join(", "));
+  if (load.skippedStatements?.length) notes.push(`${load.skippedStatements.length} statement(s) not executed because they could stall the audit or hide the rest of the file (listed below).`);
+  return notes;
 }
 
 export const CSS = `
@@ -69,6 +83,15 @@ table{border-collapse:collapse;width:100%;margin:6px 0} th,td{border:1px solid #
 .PASS{color:#047857;font-weight:700}.FAIL{color:#b91c1c;font-weight:800}
 .box{border-left:4px solid #0f766e;background:#f0fdfa;padding:8px 12px;margin:10px 0}.finding{page-break-inside:avoid;margin-bottom:9px}.small{font-size:8.8pt;color:#475569}
 `;
+
+function htmlLoadNotes(load) {
+  const items = loadNotes(load).map((n) => `<li>${esc(n)}</li>`);
+  const skipped = (load.skippedStatements || []).slice(0, 20);
+  const failed = load.failed.slice(0, 20);
+  if (!items.length && !failed.length && !skipped.length) return "";
+  const list = (label, rows) => (rows.length ? `<p class="small">${esc(label)}</p><ul>${rows.map((x) => `<li>${esc(`${x.file}:${x.line} ${x.reason ?? x.message}`)} &mdash; <code>${esc(x.statement)}</code></li>`).join("")}</ul>` : "");
+  return `<h2>Load notes</h2>${items.length ? `<ul>${items.join("")}</ul>` : ""}${list(SKIPPED_LABEL, skipped)}${list("Statements that could not be loaded (their objects are missing from this audit):", failed)}`;
+}
 
 export function toHtml(res, { title = "Supabase security audit", verification = null, badge = "" } = {}) {
   const v = verdict(res.counts);
@@ -89,5 +112,51 @@ ${ba}<h2>Findings</h2>${fl || "<p>No findings.</p>"}
 <h2>Proof: executed access tests</h2><p class="small">Each test ran as the stated role against seeded rows of two synthetic users (A and B), inside a transaction that was rolled back.</p>
 ${probeRows ? `<table><tr><th>Table</th><th>Test</th><th>Role</th><th>Expected</th><th>Observed</th><th>Result</th></tr>${probeRows}</table>` : "<p>No access tests ran.</p>"}
 ${res.proof.skipped.length ? `<p class="small">Skipped (could not seed test rows): ${res.proof.skipped.map((s) => `<code>${esc(s.table)}</code> (${esc(s.reason)})`).join("; ")}</p>` : ""}
-${fixBlock}<h2>What was and was not checked</h2><ul>${LIMITS.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></body></html>`;
+${fixBlock}<h2>What was and was not checked</h2><ul>${LIMITS.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>${htmlLoadNotes(res.load)}</body></html>`;
+}
+
+// ---- compact summary for CI (appended to $GITHUB_STEP_SUMMARY): verdict, severity table, findings, failing access tests.
+const firstLine = (t, max = 220) => {
+  const l = String(t ?? "").split("\n")[0].trim();
+  return l.length > max ? `${l.slice(0, max - 1)}…` : l;
+};
+const where = (f) => (f.locations?.length ? ` — ${mdCode(`${f.locations[0].file}:${f.locations[0].line}`)}` : "");
+
+export function toSummary(res, { title = "rls-probe: Row Level Security audit", maxFindings = 40, maxProbes = 30 } = {}) {
+  const v = verdict(res.counts);
+  const L = [`## ${mdText(title)}`, "", `**${mdText(v.text)}** ${mdText(v.detail)}`, ""];
+  L.push("| Severity | Count |", "|---|---|", ...SEVERITIES.map((s) => `| ${s} | ${res.counts[s]} |`), "");
+  L.push(`Loaded ${res.load.ok} of ${res.load.total} SQL statements from ${res.load.files.length} file(s). Failing executed access tests: **${res.proof.failures}**.`, "");
+
+  const listed = res.findings.filter((f) => f.severity !== "INFO");
+  if (listed.length) {
+    L.push("### Findings", "");
+    for (const f of listed.slice(0, maxFindings)) {
+      L.push(`- **${f.severity}** ${mdCode(f.object)} — ${mdText(f.title)}${where(f)}`, `  - Fix: ${mdText(firstLine(f.fix))}`);
+    }
+    if (listed.length > maxFindings) L.push(`- ...and ${listed.length - maxFindings} more finding(s); run the CLI with \`--out report.md\` for the full list.`);
+    L.push("");
+  }
+  if (res.counts.INFO) L.push(`${res.counts.INFO} informational note(s) are only in the full report.`, "");
+
+  const failing = res.proof.probes.filter((p) => p.pass === false);
+  if (failing.length) {
+    L.push("### Failing access tests", "", "| Table | Test | Role | Observed |", "|---|---|---|---|");
+    for (const p of failing.slice(0, maxProbes)) L.push(`| ${mdCodeCell(p.table)} | ${mdText(p.probe)} | ${mdText(p.role)} | ${mdText(p.observed)} |`);
+    if (failing.length > maxProbes) L.push(`| ...and ${failing.length - maxProbes} more | | | |`);
+    L.push("");
+  }
+
+  const notes = loadNotes(res.load).map((n) => mdText(n));
+  if (notes.length || res.load.failed.length) {
+    L.push("### Load notes", "", ...notes.map((n) => `- ${n}`));
+    if (res.load.failed.length) {
+      const shown = res.load.failed.slice(0, 5);
+      L.push(`- ${res.load.failed.length} statement(s) could not be loaded and are missing from this audit:`, ...shown.map((x) => `  - ${mdCode(`${x.file}:${x.line}`)} ${mdText(x.message)}`));
+      if (res.load.failed.length > shown.length) L.push(`  - ...and ${res.load.failed.length - shown.length} more`);
+    }
+    L.push("");
+  }
+  L.push(`<sub>${mdText(res.meta.tool)} ${mdText(res.meta.version)}: schema-only review in a sandboxed Postgres, never a live project. Not a penetration test; it cannot guarantee security.</sub>`, "");
+  return L.join("\n");
 }

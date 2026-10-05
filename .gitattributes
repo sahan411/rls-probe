@@ -1,0 +1,2 @@
+# Byte-exact line endings on every platform: the test fixtures contain multi-line names and the CLI has a shebang.
+* text=auto eol=lf

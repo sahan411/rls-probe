@@ -1,7 +1,13 @@
+import { readFileSync } from "node:fs";
 import { loadSchema } from "./loader.js";
 import { runChecks, SEVERITIES } from "./checks.js";
 import { runProbes } from "./probe.js";
 import { generateFix } from "./fixgen.js";
+import { locateFinding } from "./locations.js";
+import { functionCounts } from "./introspect.js";
+
+// One source of truth for the version: package.json (a test keeps meta.version and package.json in step).
+export const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 const RANK = Object.fromEntries(SEVERITIES.map((s, i) => [s, i]));
 
@@ -11,10 +17,10 @@ function count(findings) {
   return c;
 }
 
-// files: [{ name, text }]
+// files: [{ name, text, path? }]  (path: repository-relative path for source locations; null = unknown; omitted = use name)
 export async function audit(files, { schemas = ["public"], probe = true, defaultGrants = true } = {}) {
   const started = Date.now();
-  const { db, load } = await loadSchema(files, { defaultGrants });
+  const { db, load, locations } = await loadSchema(files, { defaultGrants });
   try {
     const { findings, model } = await runChecks(db, { schemas });
     let proof = { probes: [], skipped: [], failures: 0 };
@@ -36,12 +42,18 @@ export async function audit(files, { schemas = ["public"], probe = true, default
       }
       findings.sort((a, b) => RANK[a.severity] - RANK[b.severity] || a.object.localeCompare(b.object));
     }
+    // Where the finding lives in the supplied SQL (file, line). Attached only when certain; see src/locations.js.
+    const fnCounts = await functionCounts(db);
+    for (const f of findings) {
+      const at = locateFinding(f, locations, fnCounts);
+      if (at.length) f.locations = at;
+    }
     const tables = Object.fromEntries(Object.entries(model.tables).map(([k, t]) => [k, {
       owner_column: t.owner, rls: t.rls, policies: t.policies, sensitive_columns: t.sensitive,
       api_access: { anon: [t.anon_select && "select", t.anon_insert && "insert", t.anon_update && "update", t.anon_delete && "delete"].filter(Boolean), authenticated: [t.auth_select && "select", t.auth_insert && "insert", t.auth_update && "update", t.auth_delete && "delete"].filter(Boolean) },
     }]));
     return {
-      meta: { tool: "supabase-rls-audit", version: "0.1.0", schemas, generated: new Date().toISOString(), ms: Date.now() - started, defaultGrants, engine: "PGlite (PostgreSQL 18, WASM sandbox)" },
+      meta: { tool: "rls-probe", version: VERSION, schemas, generated: new Date().toISOString(), ms: Date.now() - started, defaultGrants, engine: "PGlite (PostgreSQL 18, WASM sandbox)" },
       load, findings, counts: count(findings), tables, proof, _model: model,
     };
   } finally {

@@ -79,6 +79,15 @@ export async function listFunctions(db, schemas) {
     });
 }
 
+// How many functions of each schema.name exist in the loaded catalog (overloads count separately). Map "schema.name" -> count.
+export async function functionCounts(db) {
+  const rows = await q(db, `
+    select n.nspname as schema, p.proname as name, count(*)::int as c
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname not in ('pg_catalog', 'information_schema') group by 1, 2`);
+  return new Map(rows.map((r) => [`${r.schema}.${r.name}`, r.c]));
+}
+
 export async function viewDependencies(db, viewOid) {
   return q(db, `
     select distinct n.nspname as schema, c.relname as name, c.relkind as kind, c.relrowsecurity as rls

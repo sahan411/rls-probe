@@ -10,6 +10,9 @@ import { toMarkdown } from "../src/report.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fx = (dir) => readdirSync(join(here, "fixtures", dir)).sort().map((f) => ({ name: f, text: readFileSync(join(here, "fixtures", dir, f), "utf8") }));
+// the vulnerable schema is audited once for the two read-only tests below
+let vulnerableRun;
+const vulnerable = () => (vulnerableRun ||= audit(fx("vulnerable")));
 const find = (res, rule, object) => res.findings.find((f) => f.rule === rule && (!object || f.object === object));
 const probe = (res, table, name) => res.proof.probes.find((p) => p.table === table && p.probe === name);
 
@@ -27,7 +30,7 @@ select 1`);
 });
 
 test("vulnerable schema: every planted mistake is found with the right severity", async () => {
-  const r = await audit(fx("vulnerable"));
+  const r = await vulnerable();
   assert.equal(r.load.failed.length, 0, JSON.stringify(r.load.failed));
   assert.equal(find(r, "RLS-DISABLED", "public.profiles").severity, "CRITICAL");
   assert.equal(find(r, "RLS-DISABLED", "public.orders").severity, "CRITICAL");
@@ -48,7 +51,7 @@ test("vulnerable schema: every planted mistake is found with the right severity"
 });
 
 test("vulnerable schema: executed probes prove the leaks", async () => {
-  const r = await audit(fx("vulnerable"));
+  const r = await vulnerable();
   assert.equal(probe(r, "public.notes", "anon reads rows").pass, false);
   assert.match(probe(r, "public.notes", "anon reads rows").observed, /2 of 2/);
   assert.equal(probe(r, "public.notes", "user A reads user B's rows").pass, false);

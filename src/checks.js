@@ -167,6 +167,7 @@ export async function runChecks(db, { schemas = ["public"] } = {}) {
 
   // ---- functions
   const looseInvoker = [];
+  const looseRefs = [];
   for (const f of funcs) {
     const callable = [f.anon_exec && "anon", f.auth_exec && "authenticated"].filter(Boolean);
     if (f.definer) {
@@ -178,14 +179,15 @@ export async function runChecks(db, { schemas = ["public"] } = {}) {
         `SECURITY DEFINER function${f.hasSearchPath ? "" : " without a fixed search_path"}${callable.length ? ` callable by ${callable.join(" and ")}` : ""}`,
         `The function runs with its owner's (superuser-like) rights. ${f.hasSearchPath ? "" : "Without `set search_path` a caller can shadow objects and escalate privileges. "}${callable.length ? "It is reachable as an RPC endpoint; it must check permissions inside." : ""}`,
         `alter function ${f.schema}.${f.name}(${f.args}) set search_path = public;  -- prefer '' and schema-qualified names${callable.includes("anon") ? `\n-- and if logged-out users must not call it: revoke execute on function ${f.schema}.${f.name}(${f.args}) from anon, public;` : ""}`,
-        { callable_by: callable, search_path_fixed: f.hasSearchPath }));
+        { callable_by: callable, search_path_fixed: f.hasSearchPath, fn: { schema: f.schema, name: f.name } }));
     } else if (!f.hasSearchPath && callable.length) {
       looseInvoker.push(f.full);
+      looseRefs.push({ schema: f.schema, name: f.name });
     }
   }
   if (looseInvoker.length) findings.push(F("FUNC-SEARCH-PATH", "0011_function_search_path_mutable", "LOW", `${looseInvoker.length} function(s)`,
     "Functions without a fixed search_path", `Hygiene issue: ${looseInvoker.slice(0, 8).join(", ")}${looseInvoker.length > 8 ? ", ..." : ""}.`,
-    "Add `set search_path = public` (or '') to each function.", { functions: looseInvoker }));
+    "Add `set search_path = public` (or '') to each function.", { functions: looseInvoker, fns: looseRefs }));
 
   // ---- storage buckets loaded by migrations
   try {

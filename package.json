@@ -1,13 +1,19 @@
 {
-  "name": "supabase-rls-audit",
-  "version": "0.1.0",
-  "description": "Audit a Supabase schema or migrations for Row Level Security gaps, then PROVE the result by executing cross-user access probes in a sandboxed Postgres. No keys, no live database.",
+  "name": "rls-probe",
+  "version": "0.2.0",
+  "description": "Offline Row Level Security audit for Supabase: loads your migrations or schema dump into a local sandbox Postgres, runs static rules plus executed access probes (anon, user A, user B), and writes a ranked report, SARIF and a draft fix. No keys, no live project.",
   "type": "module",
   "bin": {
-    "supabase-rls-audit": "bin/cli.mjs"
+    "rls-probe": "bin/cli.mjs"
   },
+  "files": [
+    "bin/",
+    "src/",
+    "examples/",
+    "action.yml"
+  ],
   "scripts": {
-    "test": "node --test test/audit.test.js"
+    "test": "node --test test/audit.test.js test/data-safety.test.js test/locations.test.js test/formats.test.js test/sarif.test.js test/ci.test.js test/cli.test.js"
   },
   "engines": {
     "node": ">=20"
@@ -18,11 +24,20 @@
     "rls",
     "postgres",
     "security",
-    "audit"
+    "audit",
+    "sarif",
+    "github-action",
+    "pglite"
   ],
   "license": "MIT",
   "author": "sahan411",
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8"
+  },
+  "devDependencies": {
+    "ajv": "^8.20.0",
+    "ajv-draft-04": "^1.0.0",
+    "ajv-formats": "^3.0.1",
+    "yaml": "^2.9.1"
   }
 }

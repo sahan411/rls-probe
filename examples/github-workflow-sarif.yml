@@ -1,0 +1,52 @@
+# Same audit as github-workflow.yml, plus upload of the results to GitHub code scanning (Security tab).
+# Copy to .github/workflows/rls-audit.yml.
+#
+# Requirements for the upload:
+#   * `security-events: write` (and, for PRIVATE repositories, `actions: read` and `contents: read`), per GitHub's documentation for
+#     github/codeql-action/upload-sarif.
+#   * The repository must have code scanning available (public repositories, or private ones with GitHub Code Security).
+#   * Pull requests from forks get a read-only token, so the upload step cannot succeed there; the audit itself, the annotations
+#     and the run summary still work.
+#   * GitHub code scanning only displays results that carry a file location. Findings whose defining statement could not be
+#     located with certainty stay in the annotations and in the run summary instead.
+name: RLS audit (code scanning)
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rls-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read            # private repositories only
+      security-events: write   # upload the SARIF file
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Audit Row Level Security
+        id: rls
+        # Replace the tag with the full commit SHA of the release you reviewed.
+        uses: sahan411/rls-probe@v0.2.0
+        with:
+          path: supabase/migrations
+          fail-on: high
+          sarif: "true"
+
+      # `if: always()`: upload the results even when the audit step failed because it found problems, which is exactly when
+      # they are wanted. The action always writes the file to $RUNNER_TEMP/rls-probe/results.sarif (the `sarif-file` output
+      # holds the same path, but a path that is known up front does not depend on outputs of a failed step). If the audit stopped
+      # before writing a file (for example an input error), this step fails too, which is the right signal.
+      - name: Upload results to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: ${{ runner.temp }}/rls-probe/results.sarif
+          category: rls-probe

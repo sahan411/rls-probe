@@ -1,0 +1,40 @@
+# Audit the Supabase migrations of every pull request for Row Level Security gaps.
+# Copy to .github/workflows/rls-audit.yml in the repository that holds supabase/migrations.
+#
+# What it does: loads the migrations into a sandboxed Postgres (no keys, no live database), runs access tests as anon and as
+# "user A" against "user B"'s rows, then
+#   * annotates the pull request files with every MEDIUM or higher finding,
+#   * writes a summary on the run page,
+#   * fails the check when a CRITICAL or HIGH finding exists (change `fail-on` below).
+#
+# No `paths:` filter on purpose: a required check that is skipped by a path filter stays "pending" and blocks the merge, and the
+# audit takes seconds. Add `paths: ["supabase/**"]` only if the check is NOT a required status check.
+name: RLS audit
+
+on:
+  pull_request:
+
+# Least privilege: the audit only reads the repository. Annotations and the run summary need no extra permission.
+permissions:
+  contents: read
+
+jobs:
+  rls-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # PINNING: third-party actions are pinned to a full commit SHA, the only reference that cannot be moved after you reviewed it.
+      # The comment names the release the SHA belongs to; Dependabot or Renovate can bump both together.
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Audit Row Level Security
+        # Replace the tag with the full commit SHA of the release you reviewed (a tag can be re-pointed, a SHA cannot).
+        uses: sahan411/rls-probe@v0.2.0
+        with:
+          path: supabase/migrations
+          fail-on: high          # high | medium | never
+          # schemas: public      # schemas exposed through the Supabase API
+          # default-grants: on   # "off" if your project removed Supabase's default privileges
