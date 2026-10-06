@@ -1,0 +1,82 @@
+# Runs the test suite on every push and pull request, and runs the published Action (`uses: ./`) against the bundled fixtures
+# so that the composite action is exercised on a real GitHub runner, not only by unit tests.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22", "24"]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js ${{ matrix.node }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run the tests
+        run: npm test
+
+  action-self-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Action on a fixed schema must pass
+        uses: ./
+        with:
+          path: test/fixtures/fixed
+
+      - name: Action on a vulnerable schema must report findings (fail-on never)
+        id: vulnerable
+        uses: ./
+        with:
+          path: test/fixtures/vulnerable
+          fail-on: never
+
+      - name: The vulnerable fixture must produce CRITICAL or HIGH findings
+        env:
+          CRITICAL: ${{ steps.vulnerable.outputs.critical }}
+          HIGH: ${{ steps.vulnerable.outputs.high }}
+        run: |
+          echo "critical=$CRITICAL high=$HIGH"
+          if [ "$(( ${CRITICAL:-0} + ${HIGH:-0} ))" -lt 1 ]; then
+            echo "expected findings on test/fixtures/vulnerable" >&2
+            exit 1
+          fi
+
+      - name: Action on a vulnerable schema must fail the step by default
+        id: gate
+        continue-on-error: true
+        uses: ./
+        with:
+          path: test/fixtures/vulnerable
+
+      - name: The default gate must have failed
+        env:
+          OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          echo "gate outcome: $OUTCOME"
+          test "$OUTCOME" = "failure"
