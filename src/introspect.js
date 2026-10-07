@@ -57,7 +57,8 @@ export async function listPolicies(db, schemas) {
       appliesAnon: roles.includes("public") || roles.includes("anon"),
       appliesAuth: roles.includes("public") || roles.includes("authenticated"),
       isWrite: ["INSERT", "UPDATE", "DELETE", "ALL"].includes(p.cmd),
-      alwaysTrue: (p.qual && p.qual.trim() === "true") || (p.with_check && p.with_check.trim() === "true"),
+      // a RESTRICTIVE policy is ANDed with the permissive ones, so a literal true in it grants nothing
+      alwaysTrue: String(p.permissive).toUpperCase() !== "RESTRICTIVE" && ((p.qual && p.qual.trim() === "true") || (p.with_check && p.with_check.trim() === "true")),
     };
   });
 }

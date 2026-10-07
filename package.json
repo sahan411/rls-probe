@@ -13,7 +13,7 @@
     "action.yml"
   ],
   "scripts": {
-    "test": "node --test test/audit.test.js test/data-safety.test.js test/locations.test.js test/formats.test.js test/sarif.test.js test/ci.test.js test/cli.test.js"
+    "test": "node --test test/audit.test.js test/data-safety.test.js test/locations.test.js test/formats.test.js test/sarif.test.js test/ci.test.js test/cli.test.js test/restrictive.test.js"
   },
   "engines": {
     "node": ">=20"
