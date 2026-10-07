@@ -107,6 +107,10 @@ function sleepVerdict(sql) {
 
 const READ_LIKE = new Set(["select", "with", "call", "explain", "values", "table", "perform"]);
 
+// Transaction control is never executed: the loader runs every statement on its own (see loader.js), and an explicit
+// BEGIN would turn one failed statement into "current transaction is aborted" for the rest of the file.
+const TXN_STATEMENT = /^\s*(begin|start\s+transaction|commit|end|rollback|abort|savepoint|release)(?![A-Za-z0-9_])/i;
+
 // Decides what the loader does with one statement.
 //   { action: "run" }
 //   { action: "skip", category: "data", what: "copy" | "insert" }       row data is never loaded
@@ -116,6 +120,8 @@ export function classifyStatement(st) {
   const first = st.kind === "copy" ? "copy" : firstKeyword(sql);
 
   if (first === "copy") return { action: "skip", category: "data", what: "copy" };
+
+  if (TXN_STATEMENT.test(sql)) return { action: "skip", category: "txn", what: first };
 
   if (first === "insert") {
     const m = /^\s*insert\s+into\s+(?:only\s+)?/i.exec(sql);

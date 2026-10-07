@@ -67,6 +67,7 @@ const SKIPPED_LABEL = "Statements that were not executed (they could stall the a
 export function loadNotes(load) {
   const notes = [];
   if (load.dataSkipped) notes.push(`${load.dataSkipped} data statement(s) skipped: row data is ignored and never loaded (every COPY and every INSERT except into storage.buckets).`);
+  if (load.assumedSchemas?.length) notes.push("Schemas used by the migrations but never created in them (probably created in the dashboard) were assumed to exist: " + [...new Set(load.assumedSchemas.map((x) => x.name))].join(", "));
   if (load.skippedExtensions.length) notes.push("Extensions not available in the sandbox and skipped: " + [...new Set(load.skippedExtensions.map((e) => e.name))].join(", "));
   if (load.skippedStatements?.length) notes.push(`${load.skippedStatements.length} statement(s) not executed because they could stall the audit or hide the rest of the file (listed below).`);
   return notes;

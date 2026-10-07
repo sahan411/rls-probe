@@ -3,6 +3,7 @@ import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import { uuid_ossp } from "@electric-sql/pglite/contrib/uuid_ossp";
 import { citext } from "@electric-sql/pglite/contrib/citext";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
+import { ltree } from "@electric-sql/pglite/contrib/ltree";
 import { splitSql } from "./splitter.js";
 import { scaffoldSql } from "./scaffold.js";
 import { classifyStatement } from "./sqlparse.js";
@@ -10,9 +11,15 @@ import { LocationIndex } from "./locations.js";
 import { qname } from "./introspect.js";
 
 // Extensions we can really load. Anything else in a dump (pg_graphql, pgsodium, vault, pg_net, postgis, ...) is skipped and reported.
-const SUPPORTED_EXT = { pgcrypto, "uuid-ossp": uuid_ossp, citext, pg_trgm };
+const SUPPORTED_EXT = { pgcrypto, "uuid-ossp": uuid_ossp, citext, pg_trgm, ltree };
 
 const BENIGN_EXISTS = /^\s*create\s+(schema|role|extension|publication)\b/i;
+
+// A migration may use a schema that was created in the dashboard (for example "private"). Such a schema is assumed to exist so the
+// statements that use it still load; each one is reported in load.assumedSchemas. Bounded, and never for system schemas.
+const MISSING_SCHEMA = /^schema "([^"]+)" does not exist/i;
+const SYSTEM_SCHEMAS = new Set(["pg_catalog", "information_schema", "pg_temp", "pg_toast", "public", "extensions"]);
+const MAX_ASSUMED_SCHEMAS = 20;
 
 export function stmtPreview(sql) {
   return sql.replace(/\s+/g, " ").slice(0, 140);
@@ -35,11 +42,14 @@ export async function loadSchema(files, { defaultGrants = true } = {}) {
   await db.exec("set search_path = public, extensions;");
 
   const locations = new LocationIndex();
-  const report = { files: files.map((f) => f.name), total: 0, ok: 0, failed: [], skippedExtensions: [], ignored: 0, dataSkipped: 0, skippedStatements: [] };
+  const report = { files: files.map((f) => f.name), total: 0, ok: 0, failed: [], skippedExtensions: [], ignored: 0, dataSkipped: 0, skippedStatements: [], transactionStatements: 0, assumedSchemas: [] };
   for (const f of files) {
     const file = f.path === undefined ? f.name : f.path;
+    // Each migration file starts from the normal API search_path (a previous file may have blanked it).
+    await db.exec("set search_path = public, extensions;");
     for (const st of splitSql(f.text)) {
       const verdict = classifyStatement(st);
+      if (verdict.action === "skip" && verdict.category === "txn") { report.transactionStatements++; continue; }
       if (verdict.action === "skip") {
         if (verdict.category === "data") report.dataSkipped++;
         else report.skippedStatements.push({ file: f.name, line: st.line, reason: verdict.reason, statement: stmtPreview(st.sql) });
@@ -61,7 +71,15 @@ export async function loadSchema(files, { defaultGrants = true } = {}) {
         if (effect?.ifNotExists) preExisting = await relationExists(db, effect.schema, effect.name);
       } catch { effect = null; }
       try {
-        await db.exec(st.sql);
+        try {
+          await db.exec(st.sql);
+        } catch (e0) {
+          const ms = MISSING_SCHEMA.exec(String(e0.message));
+          if (!ms || SYSTEM_SCHEMAS.has(ms[1].toLowerCase()) || report.assumedSchemas.length >= MAX_ASSUMED_SCHEMAS) throw e0;
+          await db.exec(`create schema if not exists "${ms[1].replace(/"/g, '""')}"`);
+          report.assumedSchemas.push({ name: ms[1], file: f.name, line: st.line });
+          await db.exec(st.sql);
+        }
         report.ok++;
         try { locations.apply(effect, { file, line: st.line, endLine: st.endLine }, { preExisting }); } catch { /* location unknown */ }
       } catch (e) {

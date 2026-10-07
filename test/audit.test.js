@@ -163,3 +163,49 @@ test("independent third-party schema (Supabase's official starter): no false ala
   assert.ok(find(r, "STORAGE-BROAD-WRITE", "storage.objects"), "a policy that lets anyone upload must still be flagged");
   assert.ok(find(r, "AUTH-INITPLAN", "public.profiles"));
 });
+
+// --- found by scanning ~150 real public Supabase repos (v0.2.1) ---
+
+test("an explicit BEGIN/COMMIT does not turn one failed statement into a whole-file failure", async () => {
+  const r = await audit([{
+    name: "txn.sql",
+    text: `begin;
+create table public.before_fail (id uuid primary key, user_id uuid);
+alter table public.never_created add column x int;
+create table public.after_fail (id uuid primary key, user_id uuid);
+commit;`,
+  }]);
+  assert.equal(r.load.failed.length, 1, JSON.stringify(r.load.failed));
+  assert.match(r.load.failed[0].message, /never_created/);
+  assert.equal(r.load.transactionStatements, 2);
+  assert.ok(find(r, "RLS-DISABLED", "public.after_fail"), "a table created after the failed statement must still be audited");
+  assert.ok(find(r, "RLS-DISABLED", "public.before_fail"));
+});
+
+test("a schema that is used but never created in the migrations is assumed and reported, not a cascade of failures", async () => {
+  const r = await audit([{
+    name: "schema.sql",
+    text: `create function private.is_admin() returns boolean language sql security definer set search_path = '' as $$ select true $$;
+create table public.docs (id uuid primary key, owner_id uuid);
+alter table public.docs enable row level security;
+create policy docs_read on public.docs for select using (private.is_admin());`,
+  }]);
+  assert.equal(r.load.failed.length, 0, JSON.stringify(r.load.failed));
+  assert.deepEqual(r.load.assumedSchemas.map((x) => x.name), ["private"]);
+  assert.match(toMarkdown(r), /assumed to exist: private/);
+});
+
+test("a blanked search_path in one migration file does not break the next file", async () => {
+  const r = await audit([
+    { name: "001.sql", text: `set search_path = '';\ncreate table public.a (id uuid primary key, user_id uuid);` },
+    { name: "002.sql", text: `create table b (id uuid primary key, user_id uuid);` },
+  ]);
+  assert.equal(r.load.failed.length, 0, JSON.stringify(r.load.failed));
+  assert.ok(find(r, "RLS-DISABLED", "public.b"));
+});
+
+test("the ltree extension loads", async () => {
+  const r = await audit([{ name: "lt.sql", text: `create extension if not exists ltree with schema extensions;\ncreate table public.t (id uuid primary key, path extensions.ltree);` }]);
+  assert.equal(r.load.failed.length, 0, JSON.stringify(r.load.failed));
+  assert.equal(r.load.skippedExtensions.length, 0);
+});
