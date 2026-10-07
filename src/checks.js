@@ -100,6 +100,8 @@ export async function runChecks(db, { schemas = ["public"] } = {}) {
     if (isStorage && p.table !== "objects") continue;
     const exprs = [p.qual, p.with_check].filter(Boolean).join(" ");
     const t = model.tables[p.full];
+    // A RESTRICTIVE policy is ANDed with the permissive ones: it can only narrow access, never grant it.
+    const restrictive = String(p.permissive).toUpperCase() === "RESTRICTIVE";
 
     if (!isStorage) {
       if (t && p.cmd === "SELECT" && p.alwaysTrue) {
@@ -133,7 +135,7 @@ export async function runChecks(db, { schemas = ["public"] } = {}) {
           "user_metadata can be changed by the signed-in user (via auth.updateUser). A policy that grants access from it can be bypassed by anyone.",
           "Use app_metadata (only the server can change it) or a separate roles table instead.", { policy: p.name, expression: exprs.slice(0, 200) }));
       }
-      if (p.isWrite && !p.alwaysTrue && (p.appliesAnon || p.appliesAuth) && !/auth\./i.test(exprs) && !/\w\s*\(/.test(exprs.replace(/::[a-z_ ]+/gi, ""))) {
+      if (p.isWrite && !restrictive && !p.alwaysTrue && (p.appliesAnon || p.appliesAuth) && !/auth\./i.test(exprs) && !/\w\s*\(/.test(exprs.replace(/::[a-z_ ]+/gi, ""))) {
         findings.push(F("POLICY-NO-IDENTITY", "custom", "MEDIUM", p.full,
           `Policy "${p.name}" allows ${p.cmd.toLowerCase()} based on row data only, not on who is asking`,
           `The condition (${exprs.slice(0, 120)}) never looks at the signed-in user, so it applies equally to everyone it is granted to.`,
@@ -144,13 +146,13 @@ export async function runChecks(db, { schemas = ["public"] } = {}) {
     } else {
       // storage.objects
       const bound = STORAGE_IDENTITY.test(exprs);
-      if (p.isWrite && (p.alwaysTrue || !bound) && (p.appliesAnon || p.appliesAuth)) {
+      if (!restrictive && p.isWrite && (p.alwaysTrue || !bound) && (p.appliesAnon || p.appliesAuth)) {
         findings.push(F("STORAGE-BROAD-WRITE", "custom", p.appliesAnon ? "HIGH" : "MEDIUM", "storage.objects",
           `Storage policy "${p.name}" allows ${p.cmd.toLowerCase()} on files without tying them to a user`,
           `${p.appliesAnon ? "Anyone" : "Any signed-in user"} can ${p.cmd === "ALL" ? "upload, overwrite and delete" : p.cmd.toLowerCase()} files in the covered bucket(s) (condition: ${exprs.slice(0, 120) || "none"}).`,
           "Add a folder or owner check, e.g. `(storage.foldername(name))[1] = (select auth.uid())::text`.", { policy: p.name, roles: p.roles }));
       }
-      if (p.cmd === "SELECT" && p.appliesAnon && !bound) {
+      if (!restrictive && p.cmd === "SELECT" && p.appliesAnon && !bound) {
         findings.push(F("STORAGE-BROAD-READ", "0025_public_bucket_allows_listing", "LOW", "storage.objects",
           `Storage policy "${p.name}" lets anyone list every file in the bucket`,
           "A broad SELECT policy lets clients enumerate file names, not just open known URLs.",

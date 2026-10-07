@@ -26,3 +26,24 @@ test("the same literal true on a PERMISSIVE policy is still reported", async () 
   `));
   assert.ok(r.findings.some((f) => f.rule === "POLICY-ALWAYS-TRUE" && f.object === "public.members"));
 });
+
+test("a RESTRICTIVE storage policy that blocks a private bucket is not reported as broad write", async () => {
+  const r = await audit(sql(`
+    insert into storage.buckets(id, name, public) values ('ticket-fonts', 'ticket-fonts', false);
+    create policy ticket_fonts_private on storage.objects as restrictive for all to anon, authenticated
+      using (bucket_id <> 'ticket-fonts') with check (bucket_id <> 'ticket-fonts');
+    create table public.t (id int primary key, owner uuid);
+    alter table public.t enable row level security;
+    create policy only_owner_rows on public.t as restrictive for select to authenticated using (owner is not null);
+  `));
+  const bad = r.findings.filter((f) => ["STORAGE-BROAD-WRITE", "STORAGE-BROAD-READ", "POLICY-NO-IDENTITY", "POLICY-ALWAYS-TRUE"].includes(f.rule));
+  assert.deepEqual(bad.map((f) => f.rule + " " + f.object), []);
+});
+
+test("the same storage policy written as PERMISSIVE is still reported", async () => {
+  const r = await audit(sql(`
+    create policy open_writes on storage.objects for all to anon, authenticated
+      using (bucket_id <> 'ticket-fonts') with check (bucket_id <> 'ticket-fonts');
+  `));
+  assert.ok(r.findings.some((f) => f.rule === "STORAGE-BROAD-WRITE"));
+});
