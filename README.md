@@ -93,13 +93,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: sahan411/rls-probe@v0.2.0   # pin the full commit SHA of the release you reviewed
+      - uses: sahan411/rls-probe@v0.2.1   # pin the full commit SHA of the release you reviewed
         with:
           path: supabase/migrations
           fail-on: high
 ```
 
-The `v0.2.0` reference only resolves once that tag exists in `sahan411/rls-probe`. A tag can be moved; the commit SHA behind it cannot.
+The `v0.2.1` reference only resolves once that tag exists in `sahan411/rls-probe`. A tag can be moved; the commit SHA behind it cannot.
 
 | Input | Default | Meaning |
 |---|---|---|
