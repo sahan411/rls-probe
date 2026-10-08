@@ -31,6 +31,14 @@
   ],
   "license": "MIT",
   "author": "sahan411",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sahan411/rls-probe.git"
+  },
+  "homepage": "https://github.com/sahan411/rls-probe#readme",
+  "bugs": {
+    "url": "https://github.com/sahan411/rls-probe/issues"
+  },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8"
   },

@@ -169,14 +169,15 @@ Your SQL is loaded statement by statement into [PGlite](https://pglite.dev) (rea
 - Tested with Node 24 (the Action uses Node 24) on Windows; the Linux runner path and the upload to GitHub code scanning are not exercised by the tests.
 
 ## Tests
-`npm test` runs 80 tests in 7 files (Node's built-in runner, no extra framework). Most of them boot a throw-away Postgres, so expect one to two minutes: 66 to 110 seconds on the development machine (an 8-thread laptop, files running in parallel). What they cover:
+`npm test` runs 88 tests in 8 files (Node's built-in runner, no extra framework). Most of them boot a throw-away Postgres, so expect one to two minutes: 66 to 110 seconds on the development machine (an 8-thread laptop, files running in parallel). What they cover:
 - `audit.test.js`: the planted mistakes of a vulnerable schema, the executed probes, a hand-secured twin (must stay quiet), a `pg_dump`-style file with psql meta-commands, the draft fix, and Supabase's own starter migration as an independent check against false alarms;
 - `data-safety.test.js`: `COPY` / `\copy` / `INSERT` skipping, the hang regression, no row data in any output, risky statements, the timeout;
 - `locations.test.js`: file and line of every located finding, and the cases where a location must be left out;
 - `formats.test.js`: GitHub annotation escaping (checked against a model of the runner's parser), hostile names, the Markdown summary;
 - `sarif.test.js`: SARIF structure, level mapping, rule ids, relative URIs, and validation against the official `sarif-schema-2.1.0.json` (downloaded once, pinned by SHA-256, cached in `node_modules/.cache`; **skipped with a message when offline**, or point `RLS_SARIF_SCHEMA` at a local copy);
 - `ci.test.js`: the Action's inputs and outputs, `action.yml` and the example workflows (SHA pinning, no `${{ }}` inside scripts, least privilege), and `bin/ci.mjs` end to end with hostile inputs;
-- `cli.test.js`: every exit code, every output file, path handling, no row data and no network use.
+- `cli.test.js`: every exit code, every output file, path handling, no row data and no network use;
+- `restrictive.test.js`: RESTRICTIVE policies only narrow access, so a RESTRICTIVE policy with a literal `true` is not reported as always-true and a RESTRICTIVE storage policy is not reported as broad write, while the same text written as PERMISSIVE still is.
 
 The test-only dependencies (`ajv`, `ajv-draft-04`, `ajv-formats`, `yaml`) are `devDependencies`; the Action installs with `--omit=dev` and the package ships only `bin/`, `src/`, `examples/` and `action.yml`.
 
