@@ -2,7 +2,7 @@
 
 > **SAMPLE REPORT - FICTIONAL DEMO APP - NO REAL DATA**
 
-Generated 2026-10-05T02:19:17.920Z by rls-probe 0.2.0 (PGlite (PostgreSQL 18, WASM sandbox)). Schemas checked: public.
+Generated 2026-10-09T10:08:30.110Z by rls-probe 0.2.3 (PGlite (PostgreSQL 18, WASM sandbox)). Schemas checked: public.
 
 Loaded 20 of 20 SQL statements from 1 file(s).
 
@@ -293,4 +293,4 @@ alter policy "admins manage settings" on "public"."workspace_settings" using (((
 - Access tests use two synthetic users and seeded rows. Tables whose columns the seeder cannot fill are listed as skipped, not as passed.
 - Assumes Supabase's default privileges for the public schema (all privileges granted to anon and authenticated; Row Level Security is what protects the data). Re-run with --default-grants off if your project removed them.
 - Rule names follow Supabase's published database linter where one exists; this is an independent implementation, not the Supabase linter.
-- This is a technical review, not a penetration test, and no review can guarantee security.
+- This is a technical review, not a penetration test, and it cannot show that an application is secure. It reports what was tested, as of the date above.

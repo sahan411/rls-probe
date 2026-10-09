@@ -32,7 +32,7 @@ jobs:
 
       - name: Audit Row Level Security
         # Replace the tag with the full commit SHA of the release you reviewed (a tag can be re-pointed, a SHA cannot).
-        uses: sahan411/rls-probe@v0.2.2
+        uses: sahan411/rls-probe@v0.2.3
         with:
           path: supabase/migrations
           fail-on: high          # high | medium | never

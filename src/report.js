@@ -9,7 +9,7 @@ const LIMITS = [
   "Access tests use two synthetic users and seeded rows. Tables whose columns the seeder cannot fill are listed as skipped, not as passed.",
   "Assumes Supabase's default privileges for the public schema (all privileges granted to anon and authenticated; Row Level Security is what protects the data). Re-run with --default-grants off if your project removed them.",
   "Rule names follow Supabase's published database linter where one exists; this is an independent implementation, not the Supabase linter.",
-  "This is a technical review, not a penetration test, and no review can guarantee security.",
+  "This is a technical review, not a penetration test, and it cannot show that an application is secure. It reports what was tested, as of the date above.",
 ];
 
 function verdict(c) {
@@ -158,6 +158,6 @@ export function toSummary(res, { title = "rls-probe: Row Level Security audit", 
     }
     L.push("");
   }
-  L.push(`<sub>${mdText(res.meta.tool)} ${mdText(res.meta.version)}: schema-only review in a sandboxed Postgres, never a live project. Not a penetration test; it cannot guarantee security.</sub>`, "");
+  L.push(`<sub>${mdText(res.meta.tool)} ${mdText(res.meta.version)}: schema-only review in a sandboxed Postgres, never a live project. Not a penetration test; it cannot show that an application is secure.</sub>`, "");
   return L.join("\n");
 }

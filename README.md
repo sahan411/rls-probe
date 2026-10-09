@@ -93,13 +93,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: sahan411/rls-probe@v0.2.2   # pin the full commit SHA of the release you reviewed
+      - uses: sahan411/rls-probe@v0.2.3   # pin the full commit SHA of the release you reviewed
         with:
           path: supabase/migrations
           fail-on: high
 ```
 
-The `v0.2.2` reference only resolves once that tag exists in `sahan411/rls-probe`. A tag can be moved; the commit SHA behind it cannot.
+The `v0.2.3` reference only resolves once that tag exists in `sahan411/rls-probe`. A tag can be moved; the commit SHA behind it cannot.
 
 | Input | Default | Meaning |
 |---|---|---|
@@ -158,7 +158,7 @@ Rule names follow Supabase's [database linter](https://supabase.com/docs/guides/
 Your SQL is loaded statement by statement into [PGlite](https://pglite.dev) (real PostgreSQL compiled to WASM, in-process, no network) on top of a small emulation of Supabase's roles, `auth.users`, `auth.uid()` and `storage`. The audit runs in a worker thread so the time limit can be enforced. Findings come from the real catalogs (`pg_class`, `pg_policies`, `pg_proc`, `has_table_privilege`, ...). Access tests run `set local role anon|authenticated` with JWT claims and roll back. Statements that cannot be loaded are listed, never silently dropped.
 
 ## Honest limits
-- A schema-level review, not a penetration test; no tool can guarantee security. The schema is loaded into a local sandbox only: no live project, no network, no keys.
+- A schema-level review, not a penetration test, and no tool can show that an application is secure. The schema is loaded into a local sandbox only: no live project, no network, no keys.
 - Schema-only: no data, no Auth/dashboard settings, no Edge Function logic, no leaked-key scan, no business-logic review. Row data in a dump is skipped and never printed.
 - Assumes Supabase's default public-schema privileges (switch off with `--default-grants off`).
 - Extensions the sandbox cannot load (e.g. `pg_graphql`, `pgsodium`) are skipped and reported.
@@ -169,11 +169,11 @@ Your SQL is loaded statement by statement into [PGlite](https://pglite.dev) (rea
 - CI runs the test suite on Linux (`ubuntu-latest`) with Node 20, 22 and 24 and runs the composite Action against the bundled fixtures; development happens on Windows with Node 24. macOS is not tested. The upload of the SARIF file to GitHub code scanning is not exercised by the tests or by CI.
 
 ## Tests
-`npm test` runs 88 tests in 8 files (Node's built-in runner, no extra framework). Most of them boot a throw-away Postgres, so expect one to two minutes: 66 to 110 seconds on the development machine (an 8-thread laptop, files running in parallel). What they cover:
+`npm test` runs 89 tests in 8 files (Node's built-in runner, no extra framework). Most of them boot a throw-away Postgres, so expect one to two minutes: 66 to 110 seconds on the development machine (an 8-thread laptop, files running in parallel). Each audit process holds about 1 to 1.5 GB of memory; on a machine with little free memory the parallel run can abort with "out of memory", and `npm run test:serial` runs the files one at a time (about 2.5 minutes). What they cover:
 - `audit.test.js`: the planted mistakes of a vulnerable schema, the executed probes, a hand-secured twin (must stay quiet), a `pg_dump`-style file with psql meta-commands, the draft fix, and Supabase's own starter migration as an independent check against false alarms;
 - `data-safety.test.js`: `COPY` / `\copy` / `INSERT` skipping, the hang regression, no row data in any output, risky statements, the timeout;
 - `locations.test.js`: file and line of every located finding, and the cases where a location must be left out;
-- `formats.test.js`: GitHub annotation escaping (checked against a model of the runner's parser), hostile names, the Markdown summary;
+- `formats.test.js`: GitHub annotation escaping (checked against a model of the runner's parser), hostile names, the Markdown summary, and the wording of the disclaimers (a test keeps claims of absolute security out of every report format);
 - `sarif.test.js`: SARIF structure, level mapping, rule ids, relative URIs, and validation against the official `sarif-schema-2.1.0.json` (downloaded once, pinned by SHA-256, cached in `node_modules/.cache`; **skipped with a message when offline**, or point `RLS_SARIF_SCHEMA` at a local copy);
 - `ci.test.js`: the Action's inputs and outputs, `action.yml` and the example workflows (SHA pinning, no `${{ }}` inside scripts, least privilege), and `bin/ci.mjs` end to end with hostile inputs;
 - `cli.test.js`: every exit code, every output file, path handling, no row data and no network use;

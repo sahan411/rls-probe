@@ -34,7 +34,7 @@ jobs:
       - name: Audit Row Level Security
         id: rls
         # Replace the tag with the full commit SHA of the release you reviewed.
-        uses: sahan411/rls-probe@v0.2.2
+        uses: sahan411/rls-probe@v0.2.3
         with:
           path: supabase/migrations
           fail-on: high

@@ -154,6 +154,16 @@ test("HTML report escapes names taken from the audited SQL", async () => {
   assert.ok(!/<a\s/i.test(html), "the report contains no links built from audited names");
 });
 
+test("outward copy: no report format claims a guarantee, a sign-off or an assurance", async () => {
+  const res = await auditFixture("vulnerable", {}, { withPaths: true });
+  const outputs = { markdown: toMarkdown(res), html: toHtml(res), summary: toSummary(res) };
+  for (const [name, text] of Object.entries(outputs)) {
+    assert.ok(!/guarantee|sign-?off|assurance/i.test(text), `${name} output uses a banned word`);
+    assert.match(text, /not a penetration test/i, `${name} output keeps the penetration-test disclaimer`);
+  }
+  assert.match(outputs.markdown, /cannot show that an application is secure/);
+});
+
 test("JSON result: locations are repository-relative, no engine internals, one version everywhere", async () => {
   const res = await auditFixture("vulnerable", {}, { withPaths: true });
   const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
