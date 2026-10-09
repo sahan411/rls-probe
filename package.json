@@ -1,6 +1,6 @@
 {
   "name": "rls-probe",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Offline Row Level Security audit for Supabase: loads your migrations or schema dump into a local sandbox Postgres, runs static rules plus executed access probes (anon, user A, user B), and writes a ranked report, SARIF and a draft fix. No keys, no live project.",
   "type": "module",
   "bin": {

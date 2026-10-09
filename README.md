@@ -33,7 +33,7 @@ git clone https://github.com/sahan411/rls-probe && cd rls-probe && npm install
 node bin/cli.mjs path/to/supabase/migrations --out report.md
 ```
 
-The package's command is `rls-probe` (`bin` in `package.json`); from a clone, `node bin/cli.mjs` runs the same program (the examples below use it). Node 20 or newer is declared in `engines`; the tests and the Action run on Node 24. The first install pulls the Postgres WASM engine from npm (about 25 MB on disk).
+The package's command is `rls-probe` (`bin` in `package.json`); from a clone, `node bin/cli.mjs` runs the same program (the examples below use it). Node 20 or newer is declared in `engines`; CI runs the tests on Node 20, 22 and 24, and the Action runs on Node 24. The first install pulls the Postgres WASM engine from npm (about 25 MB on disk).
 
 ### Where do I get the schema?
 Any one of these (all contain structure only, no data and no secrets):
@@ -93,13 +93,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: sahan411/rls-probe@v0.2.1   # pin the full commit SHA of the release you reviewed
+      - uses: sahan411/rls-probe@v0.2.2   # pin the full commit SHA of the release you reviewed
         with:
           path: supabase/migrations
           fail-on: high
 ```
 
-The `v0.2.1` reference only resolves once that tag exists in `sahan411/rls-probe`. A tag can be moved; the commit SHA behind it cannot.
+The `v0.2.2` reference only resolves once that tag exists in `sahan411/rls-probe`. A tag can be moved; the commit SHA behind it cannot.
 
 | Input | Default | Meaning |
 |---|---|---|
@@ -166,7 +166,7 @@ Your SQL is loaded statement by statement into [PGlite](https://pglite.dev) (rea
 - File and line locations exist only where the mapping is certain (see above); findings without one still appear in the report, the annotations (without a file) and the summary, but not in GitHub code scanning.
 - A statement that blocks without being recognised is only stopped by `--timeout`; the audit then produces no report (exit code 70). SQL-standard `BEGIN ATOMIC` function bodies are not split correctly.
 - The draft fix is mechanical for owner-scoped tables and views/functions; anything needing a product decision is listed for a human. Review before applying.
-- Tested with Node 24 (the Action uses Node 24) on Windows; the Linux runner path and the upload to GitHub code scanning are not exercised by the tests.
+- CI runs the test suite on Linux (`ubuntu-latest`) with Node 20, 22 and 24 and runs the composite Action against the bundled fixtures; development happens on Windows with Node 24. macOS is not tested. The upload of the SARIF file to GitHub code scanning is not exercised by the tests or by CI.
 
 ## Tests
 `npm test` runs 88 tests in 8 files (Node's built-in runner, no extra framework). Most of them boot a throw-away Postgres, so expect one to two minutes: 66 to 110 seconds on the development machine (an 8-thread laptop, files running in parallel). What they cover:
