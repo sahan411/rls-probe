@@ -62,7 +62,7 @@ node bin/cli.mjs schema.sql --out report.md --html report.html --fix fix.sql
 | `--fix fix.sql` | write a **draft** fix migration, apply it to a fresh copy and re-audit (before/after) |
 | `--schemas public,api` | schemas exposed through the Data API (default `public`) |
 | `--no-probe` | skip the executed access tests |
-| `--default-grants on\|off` | assume Supabase's default privileges on `public` (default `on`) |
+| `--default-grants on\|off` | `on` (default): new tables in `public` are granted to `anon` and `authenticated` automatically, as Supabase did before. `off`: only grants written in your SQL count, as on projects created since 2026-05-30 (see [Default privileges](#default-privileges-and-the-30-october-2026-change)) |
 | `--fail-on high\|medium\|never` | exit code 2 when findings at that level exist (CI gate; default `high`) |
 | `--timeout seconds` | abort the whole audit after this long (default 60), exit code 70 |
 | `--title "text"`, `--badge "text"` | report title and banner line |
@@ -93,13 +93,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: sahan411/rls-probe@v0.2.3   # pin the full commit SHA of the release you reviewed
+      - uses: sahan411/rls-probe@v0.2.4   # pin the full commit SHA of the release you reviewed
         with:
           path: supabase/migrations
           fail-on: high
 ```
 
-The `v0.2.3` reference only resolves once that tag exists in `sahan411/rls-probe`. A tag can be moved; the commit SHA behind it cannot.
+The `v0.2.4` reference only resolves once that tag exists in `sahan411/rls-probe`. A tag can be moved; the commit SHA behind it cannot.
 
 | Input | Default | Meaning |
 |---|---|---|
@@ -146,6 +146,7 @@ Rule names follow Supabase's [database linter](https://supabase.com/docs/guides/
 | `POLICY-ALWAYS-TRUE` | 0024 | `using (true)` / `with check (true)`; public read is only a "confirm" item, public write is HIGH |
 | `USER-METADATA-POLICY` | 0015 | policy trusts `user_metadata`, which users can edit |
 | `POLICY-NO-IDENTITY` | custom | write policy that never looks at the caller |
+| `POLICY-NO-GRANT` | custom | RLS policies exist for `anon`/`authenticated`, but the role holds no matching table privilege, so the API answers "permission denied" (LOW; mostly seen with `--default-grants off`) |
 | `AUTH-USERS-EXPOSED` / `VIEW-DEFINER` | 0002 / 0010 | views that bypass RLS (and leak `auth.users`) |
 | `MATVIEW-IN-API` | 0016 | materialized view reachable through the API |
 | `DEFINER-FUNCTION` / `FUNC-SEARCH-PATH` | 0011 / 0028 / 0029 | SECURITY DEFINER functions without `search_path`, callable by `anon` |
@@ -154,13 +155,22 @@ Rule names follow Supabase's [database linter](https://supabase.com/docs/guides/
 
 **Executed access tests** (per table, seeded with two synthetic users): anon read/insert/update/delete, user A reading/updating/deleting/forging rows of user B, and "can the owner still read their own rows". Failing tests become findings even when no static rule fired. A deliberate public-read policy is reported as "confirm", not as a failure.
 
+## Default privileges and the 30 October 2026 change
+Row Level Security decides which rows a role sees, but a role must first hold the table privilege. Supabase used to grant every new `public` table to `anon`, `authenticated` and `service_role` automatically, so RLS was the only protection. According to [Supabase's announcement](https://github.com/orgs/supabase/discussions/45329) (read on 2026-10-15), new tables no longer get those grants: this is the default for projects created from 2026-05-30, and from 2026-10-30 it applies to new tables in older projects. Existing tables keep the grants they have, and RLS itself is unchanged.
+
+rls-probe models both worlds, and every report states which one it used:
+- `--default-grants on` (the default, kept because it is the cautious reading): a table without an explicit grant is assumed reachable, so a table with RLS off is reported as open.
+- `--default-grants off`: a table is reachable only where your SQL grants it. A table with RLS off and no grant is not exposed and gets no access tests; a table whose policies no grant can reach is reported as `POLICY-NO-GRANT` (LOW), which is exactly what produces "permission denied" (error 42501) after the change.
+
+If you do not know which applies to your project, run both and compare.
+
 ## How it works
 Your SQL is loaded statement by statement into [PGlite](https://pglite.dev) (real PostgreSQL compiled to WASM, in-process, no network) on top of a small emulation of Supabase's roles, `auth.users`, `auth.uid()` and `storage`. The audit runs in a worker thread so the time limit can be enforced. Findings come from the real catalogs (`pg_class`, `pg_policies`, `pg_proc`, `has_table_privilege`, ...). Access tests run `set local role anon|authenticated` with JWT claims and roll back. Statements that cannot be loaded are listed, never silently dropped.
 
 ## Honest limits
 - A schema-level review, not a penetration test, and no tool can show that an application is secure. The schema is loaded into a local sandbox only: no live project, no network, no keys.
 - Schema-only: no data, no Auth/dashboard settings, no Edge Function logic, no leaked-key scan, no business-logic review. Row data in a dump is skipped and never printed.
-- Assumes Supabase's default public-schema privileges (switch off with `--default-grants off`).
+- The result depends on the default-privileges setting (`--default-grants on` by default); every report says which one it used. See below.
 - Extensions the sandbox cannot load (e.g. `pg_graphql`, `pgsodium`) are skipped and reported.
 - Tables whose columns the seeder cannot fill are reported as skipped, not passed.
 - File and line locations exist only where the mapping is certain (see above); findings without one still appear in the report, the annotations (without a file) and the summary, but not in GitHub code scanning.
@@ -169,7 +179,7 @@ Your SQL is loaded statement by statement into [PGlite](https://pglite.dev) (rea
 - CI runs the test suite on Linux (`ubuntu-latest`) with Node 20, 22 and 24 and runs the composite Action against the bundled fixtures; development happens on Windows with Node 24. macOS is not tested. The upload of the SARIF file to GitHub code scanning is not exercised by the tests or by CI.
 
 ## Tests
-`npm test` runs 89 tests in 8 files (Node's built-in runner, no extra framework). Most of them boot a throw-away Postgres, so expect one to two minutes: 66 to 110 seconds on the development machine (an 8-thread laptop, files running in parallel). Each audit process holds about 1 to 1.5 GB of memory; on a machine with little free memory the parallel run can abort with "out of memory", and `npm run test:serial` runs the files one at a time (about 2.5 minutes). What they cover:
+`npm test` runs 97 tests in 9 files (Node's built-in runner, no extra framework). Most of them boot a throw-away Postgres, so expect one to two minutes: 66 to 110 seconds on the development machine (an 8-thread laptop, files running in parallel). Each audit process holds about 1 to 1.5 GB of memory; on a machine with little free memory the parallel run can abort with "out of memory", and `npm run test:serial` runs the files one at a time (about 2.5 minutes). What they cover:
 - `audit.test.js`: the planted mistakes of a vulnerable schema, the executed probes, a hand-secured twin (must stay quiet), a `pg_dump`-style file with psql meta-commands, the draft fix, and Supabase's own starter migration as an independent check against false alarms;
 - `data-safety.test.js`: `COPY` / `\copy` / `INSERT` skipping, the hang regression, no row data in any output, risky statements, the timeout;
 - `locations.test.js`: file and line of every located finding, and the cases where a location must be left out;
@@ -177,7 +187,8 @@ Your SQL is loaded statement by statement into [PGlite](https://pglite.dev) (rea
 - `sarif.test.js`: SARIF structure, level mapping, rule ids, relative URIs, and validation against the official `sarif-schema-2.1.0.json` (downloaded once, pinned by SHA-256, cached in `node_modules/.cache`; **skipped with a message when offline**, or point `RLS_SARIF_SCHEMA` at a local copy);
 - `ci.test.js`: the Action's inputs and outputs, `action.yml` and the example workflows (SHA pinning, no `${{ }}` inside scripts, least privilege), and `bin/ci.mjs` end to end with hostile inputs;
 - `cli.test.js`: every exit code, every output file, path handling, no row data and no network use;
-- `restrictive.test.js`: RESTRICTIVE policies only narrow access, so a RESTRICTIVE policy with a literal `true` is not reported as always-true and a RESTRICTIVE storage policy is not reported as broad write, while the same text written as PERMISSIVE still is.
+- `restrictive.test.js`: RESTRICTIVE policies only narrow access, so a RESTRICTIVE policy with a literal `true` is not reported as always-true and a RESTRICTIVE storage policy is not reported as broad write, while the same text written as PERMISSIVE still is;
+- `grants.test.js`: the default-privileges setting: `POLICY-NO-GRANT` (when it fires and when it must not), its draft fix and SARIF entry, and that every report format states whether the run assumed the previous Supabase defaults or only explicit grants.
 
 The test-only dependencies (`ajv`, `ajv-draft-04`, `ajv-formats`, `yaml`) are `devDependencies`; the Action installs with `--omit=dev` and the package ships only `bin/`, `src/`, `examples/` and `action.yml`.
 

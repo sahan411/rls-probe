@@ -218,6 +218,9 @@ export function locateFinding(f, index, fnCounts = new Map()) {
   } else if (f.rule === "POLICY-NO-RLS") {
     for (const name of ev.policies || []) { add(index.policy(f.object, name)); if (out.length) break; }
     if (!out.length) add(index.relation(f.object));
+  } else if (f.rule === "POLICY-NO-GRANT") {
+    for (const g of ev.gaps || []) { for (const name of g.policies) { add(index.policy(f.object, name)); if (out.length) break; } if (out.length) break; }
+    if (!out.length) add(index.relation(f.object));
   } else if (DEFINITION_RULES.has(f.rule)) {
     add(index.relation(f.object));
   } else if (f.rule === "AUTH-INITPLAN") {

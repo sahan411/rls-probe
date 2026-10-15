@@ -27,7 +27,8 @@ Options
   --title "text"         report title
   --badge "text"         banner line at the top of the report (e.g. SAMPLE - FICTIONAL APP)
   --no-probe             skip the executed access tests
-  --default-grants on|off   assume Supabase's default privileges on the public schema (default: on)
+  --default-grants on|off   on: new public tables are granted to anon and authenticated automatically (the previous Supabase
+                         default, kept as the default here); off: only grants written in your SQL count (projects created from 2026-05-30)
   --fail-on high|medium|never   exit code 2 if findings at this level exist (default: high)
   --timeout seconds      abort the whole audit after this long (default: ${DEFAULT_TIMEOUT_SECONDS}); exits with code 70
   -h, --help

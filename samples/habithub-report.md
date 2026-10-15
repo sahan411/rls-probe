@@ -2,7 +2,7 @@
 
 > **SAMPLE REPORT - FICTIONAL DEMO APP - NO REAL DATA**
 
-Generated 2026-10-09T10:08:30.110Z by rls-probe 0.2.3 (PGlite (PostgreSQL 18, WASM sandbox)). Schemas checked: public.
+Generated 2026-10-15T01:45:04.750Z by rls-probe 0.2.4 (PGlite (PostgreSQL 18, WASM sandbox)). Schemas checked: public. Default privileges: on (the previous Supabase default: new tables are granted to anon and authenticated automatically).
 
 Loaded 20 of 20 SQL statements from 1 file(s).
 
@@ -291,6 +291,6 @@ alter policy "admins manage settings" on "public"."workspace_settings" using (((
 - This is an audit of the schema and migrations you supplied (tables, views, functions, policies, grants) executed in a sandboxed Postgres. It never connects to your live project and never needs your keys.
 - Not checked: leaked keys in code or git history, Edge Function and API route logic, Auth settings (email confirmation, OTP expiry, redirect URLs), hosting and dashboard configuration, rate limiting, business-logic abuse, and the actual data in your tables.
 - Access tests use two synthetic users and seeded rows. Tables whose columns the seeder cannot fill are listed as skipped, not as passed.
-- Assumes Supabase's default privileges for the public schema (all privileges granted to anon and authenticated; Row Level Security is what protects the data). Re-run with --default-grants off if your project removed them.
+- Default privileges: ON. This run assumes Supabase's previous behaviour, where every table created in the public schema is granted to anon and authenticated automatically and Row Level Security is the only protection. Supabase stopped doing this: projects created from 30 May 2026 get no automatic grants, and from 30 October 2026 new tables in older projects get none either (existing tables keep their grants). If your project is in that group, re-run with --default-grants off.
 - Rule names follow Supabase's published database linter where one exists; this is an independent implementation, not the Supabase linter.
 - This is a technical review, not a penetration test, and it cannot show that an application is secure. It reports what was tested, as of the date above.

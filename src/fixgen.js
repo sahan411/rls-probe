@@ -54,6 +54,13 @@ export function generateFix(findings, model) {
       case "POLICY-NO-RLS":
         once(`rls:${f.object}`, () => sql.push(`alter table ${qname(schema, table)} enable row level security;`, ""));
         break;
+      case "POLICY-NO-GRANT":
+        once(`grant:${f.object}`, () => {
+          sql.push(`-- ${f.object}: policies exist but the role holds no matching table privilege, so the API answers "permission denied". Grant only what the app needs.`);
+          for (const g of f.evidence.gaps) sql.push(`grant ${g.privileges.join(", ")} on ${qname(schema, table)} to ${g.role};`);
+          sql.push("");
+        });
+        break;
       case "POLICY-ALWAYS-TRUE":
         if (t?.owner && f.severity !== "INFO" && f.severity !== "LOW") {
           once(`pol:${f.object}:${f.evidence.policy}`, () => {

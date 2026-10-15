@@ -3,11 +3,18 @@ import { mdText, mdCode, mdCodeCell } from "./text.js";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-const LIMITS = [
+// The default-privileges setting changes what is exposed, so every report says which one the run used.
+const grantsOn = (res) => res.meta.defaultGrants !== false;
+const grantsLabel = (res) => (grantsOn(res) ? "on (the previous Supabase default: new tables are granted to anon and authenticated automatically)" : "off (only grants written in the supplied SQL count)");
+
+const GRANTS_ON = "Default privileges: ON. This run assumes Supabase's previous behaviour, where every table created in the public schema is granted to anon and authenticated automatically and Row Level Security is the only protection. Supabase stopped doing this: projects created from 30 May 2026 get no automatic grants, and from 30 October 2026 new tables in older projects get none either (existing tables keep their grants). If your project is in that group, re-run with --default-grants off.";
+const GRANTS_OFF = "Default privileges: OFF. This run assumes Supabase's newer behaviour: a table is reachable through the API only where the supplied SQL grants it to anon, authenticated or service_role. A table with no grant is not exposed, so it gets no access tests; policies on such a table are reported as a low-severity note. If your project is older and its existing tables were exposed by the previous defaults, re-run with --default-grants on.";
+
+const limits = (res) => [
   "This is an audit of the schema and migrations you supplied (tables, views, functions, policies, grants) executed in a sandboxed Postgres. It never connects to your live project and never needs your keys.",
   "Not checked: leaked keys in code or git history, Edge Function and API route logic, Auth settings (email confirmation, OTP expiry, redirect URLs), hosting and dashboard configuration, rate limiting, business-logic abuse, and the actual data in your tables.",
   "Access tests use two synthetic users and seeded rows. Tables whose columns the seeder cannot fill are listed as skipped, not as passed.",
-  "Assumes Supabase's default privileges for the public schema (all privileges granted to anon and authenticated; Row Level Security is what protects the data). Re-run with --default-grants off if your project removed them.",
+  grantsOn(res) ? GRANTS_ON : GRANTS_OFF,
   "Rule names follow Supabase's published database linter where one exists; this is an independent implementation, not the Supabase linter.",
   "This is a technical review, not a penetration test, and it cannot show that an application is secure. It reports what was tested, as of the date above.",
 ];
@@ -27,7 +34,7 @@ export function toMarkdown(res, { title = "Supabase security audit", verificatio
   const L = [];
   L.push(`# ${title}`, "");
   if (badge) L.push(`> **${badge}**`, "");
-  L.push(`Generated ${res.meta.generated} by ${res.meta.tool} ${res.meta.version} (${res.meta.engine}). Schemas checked: ${res.meta.schemas.join(", ")}.`, "");
+  L.push(`Generated ${res.meta.generated} by ${res.meta.tool} ${res.meta.version} (${res.meta.engine}). Schemas checked: ${res.meta.schemas.join(", ")}. Default privileges: ${grantsLabel(res)}.`, "");
   L.push(`Loaded ${res.load.ok} of ${res.load.total} SQL statements from ${res.load.files.length} file(s)${res.load.failed.length ? `; ${res.load.failed.length} could not be loaded (listed at the end)` : ""}.`, "");
   L.push("## Verdict", "", `**${v.text}** ${v.detail}`, "");
   L.push("| Severity | Count |", "|---|---|", ...SEVERITIES.map((s) => `| ${s} | ${res.counts[s]} |`), "");
@@ -53,7 +60,7 @@ export function toMarkdown(res, { title = "Supabase security audit", verificatio
   if (res.proof.skipped.length) L.push("", "Skipped (could not seed test rows): " + res.proof.skipped.map((s) => `\`${s.table}\` (${s.reason})`).join("; "));
   L.push("");
   if (verification) L.push("## Draft fix (SQL)", "", "```sql", verification.fix.sql.trim(), "```", "", ...(verification.fix.manual.length ? ["### Needs a human decision", "", ...verification.fix.manual.map((m) => `- \`${m.object}\` (${m.rule}): ${m.note}`), ""] : []));
-  L.push("## What was and was not checked", "", ...LIMITS.map((x) => `- ${x}`), "");
+  L.push("## What was and was not checked", "", ...limits(res).map((x) => `- ${x}`), "");
   const notes = loadNotes(res.load);
   if (notes.length) L.push("## Load notes", "", ...notes.flatMap((n) => [n, ""]));
   if (res.load.skippedStatements?.length) L.push(SKIPPED_LABEL, "",...res.load.skippedStatements.slice(0, 20).map((x) => `- ${x.file}:${x.line} ${x.reason} — \`${x.statement}\``), "");
@@ -106,14 +113,14 @@ export function toHtml(res, { title = "Supabase security audit", verification = 
   const fixBlock = verification ? `<h2>Draft fix (SQL)</h2><pre>${esc(verification.fix.sql.trim())}</pre>${verification.fix.manual.length ? `<h3>Needs a human decision</h3><ul>${verification.fix.manual.map((m) => `<li><code>${esc(m.object)}</code> (${esc(m.rule)}): ${esc(m.note)}</li>`).join("")}</ul>` : ""}` : "";
   return `<html><head><meta charset="utf-8"><title>${esc(title)}</title><style>${CSS}</style></head><body>
 ${badge ? `<span class="badge">${esc(badge)}</span>` : ""}<h1>${esc(title)}</h1>
-<p class="small">Generated ${esc(res.meta.generated)} by ${esc(res.meta.tool)} ${esc(res.meta.version)} (${esc(res.meta.engine)}). Schemas checked: ${esc(res.meta.schemas.join(", "))}. Loaded ${res.load.ok} of ${res.load.total} SQL statements.</p>
+<p class="small">Generated ${esc(res.meta.generated)} by ${esc(res.meta.tool)} ${esc(res.meta.version)} (${esc(res.meta.engine)}). Schemas checked: ${esc(res.meta.schemas.join(", "))}. Default privileges: ${esc(grantsLabel(res))}. Loaded ${res.load.ok} of ${res.load.total} SQL statements.</p>
 <h2>Verdict</h2><div class="box"><b>${esc(v.text)}</b> ${esc(v.detail)}</div>
 <table><tr><th>Severity</th><th>Count</th></tr>${SEVERITIES.map((s) => `<tr><td class="${s}">${s}</td><td>${res.counts[s]}</td></tr>`).join("")}</table>
 ${ba}<h2>Findings</h2>${fl || "<p>No findings.</p>"}
 <h2>Proof: executed access tests</h2><p class="small">Each test ran as the stated role against seeded rows of two synthetic users (A and B), inside a transaction that was rolled back.</p>
 ${probeRows ? `<table><tr><th>Table</th><th>Test</th><th>Role</th><th>Expected</th><th>Observed</th><th>Result</th></tr>${probeRows}</table>` : "<p>No access tests ran.</p>"}
 ${res.proof.skipped.length ? `<p class="small">Skipped (could not seed test rows): ${res.proof.skipped.map((s) => `<code>${esc(s.table)}</code> (${esc(s.reason)})`).join("; ")}</p>` : ""}
-${fixBlock}<h2>What was and was not checked</h2><ul>${LIMITS.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>${htmlLoadNotes(res.load)}</body></html>`;
+${fixBlock}<h2>What was and was not checked</h2><ul>${limits(res).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>${htmlLoadNotes(res.load)}</body></html>`;
 }
 
 // ---- compact summary for CI (appended to $GITHUB_STEP_SUMMARY): verdict, severity table, findings, failing access tests.
@@ -127,7 +134,7 @@ export function toSummary(res, { title = "rls-probe: Row Level Security audit", 
   const v = verdict(res.counts);
   const L = [`## ${mdText(title)}`, "", `**${mdText(v.text)}** ${mdText(v.detail)}`, ""];
   L.push("| Severity | Count |", "|---|---|", ...SEVERITIES.map((s) => `| ${s} | ${res.counts[s]} |`), "");
-  L.push(`Loaded ${res.load.ok} of ${res.load.total} SQL statements from ${res.load.files.length} file(s). Failing executed access tests: **${res.proof.failures}**.`, "");
+  L.push(`Loaded ${res.load.ok} of ${res.load.total} SQL statements from ${res.load.files.length} file(s). Failing executed access tests: **${res.proof.failures}**. Default privileges: ${grantsOn(res) ? "on" : "off"}.`, "");
 
   const listed = res.findings.filter((f) => f.severity !== "INFO");
   if (listed.length) {

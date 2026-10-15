@@ -22,6 +22,31 @@ function privs(r, role) {
   return p.filter(([, v]) => v).map(([k]) => k);
 }
 
+// Table privilege each policy command needs before the API role can even reach the policy.
+const CMD_PRIVS = { SELECT: ["select"], INSERT: ["insert"], UPDATE: ["update"], DELETE: ["delete"], ALL: ["select", "insert", "update", "delete"] };
+
+// Roles that have a permissive policy on the table but not the privilege that policy needs. A policy for one command is a gap
+// when that privilege is missing; a policy for ALL is a gap only when the role holds no privilege at all (a role that was
+// deliberately given read-only grants is a choice, not a mistake).
+function grantGaps(r, policies) {
+  const gaps = [];
+  for (const role of ["anon", "authenticated"]) {
+    const have = new Set(privs(r, role));
+    const missing = new Set();
+    const names = new Set();
+    for (const p of policies) {
+      if (String(p.permissive).toUpperCase() === "RESTRICTIVE") continue;
+      if (!(role === "anon" ? p.appliesAnon : p.appliesAuth)) continue;
+      const needs = CMD_PRIVS[p.cmd] || [];
+      if (p.cmd === "ALL" ? have.size > 0 : needs.every((x) => have.has(x))) continue;
+      for (const x of needs) if (!have.has(x)) missing.add(x);
+      names.add(p.name);
+    }
+    if (missing.size) gaps.push({ role, privileges: ["select", "insert", "update", "delete"].filter((x) => missing.has(x)), policies: [...names] });
+  }
+  return gaps;
+}
+
 // Runs every static check against the loaded catalog. Returns { findings, model } where model carries per-table facts reused by probes and fixes.
 export async function runChecks(db, { schemas = ["public"] } = {}) {
   seq = 0;
@@ -65,6 +90,15 @@ export async function runChecks(db, { schemas = ["public"] } = {}) {
           "RLS is on but no policy exists: the API returns no rows (safe, but check the app expects this)",
           "With RLS enabled and no policies, anon and signed-in users see nothing. Safe by default; confirm it is intended.",
           "Add the policies the app needs, if any.", {}));
+      }
+      const gaps = r.rls ? grantGaps(r, tp) : [];
+      if (gaps.length) {
+        const roles = gaps.map((g) => g.role).join(" and ");
+        findings.push(F("POLICY-NO-GRANT", "custom", "LOW", r.full,
+          `Policies exist but no grant lets ${roles} reach the table`,
+          `Row Level Security only filters rows for a role that already holds the table privilege. Here ${gaps.map((g) => `${g.role} has ${g.policies.length > 1 ? "policies" : "policy"} "${g.policies.join('", "')}" but lacks ${g.privileges.join("/")}`).join("; ")}, so the Data API answers "permission denied for table ${r.name}" (error 42501) instead of applying the policy. Supabase no longer grants new public tables to these roles automatically (the default for projects created from 30 May 2026, and for new tables in older projects from 30 October 2026), so a migration that relied on the old default breaks on a new project or a rebuilt database. Existing tables keep the grants they already have.`,
+          gaps.map((g) => `grant ${g.privileges.join(", ")} on ${r.full} to ${g.role};`).join("\n") + "  -- grant only what the app needs",
+          { gaps }));
       }
     } else if (r.kind === "v") {
       if (!exposed) continue;
